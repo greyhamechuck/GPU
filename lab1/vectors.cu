@@ -123,7 +123,7 @@ int main(int argc, char *argv[]){
 		cudaFree(bd);
 		cudaFree(cd);
 	
-		printf("Total time taken by the GPU part = %f seconds\n", gpu_elapsed_time / 1000.0f); // Time is in ms
+	printf("Total time taken by the GPU part = %lf\n", (double)(gpu_stop - gpu_start) / CLOCKS_PER_SEC);
 	/****************** The end of the GPU part: Do not modify anything in main() below this line  ************/
 	
 	//checking the correctness of the GPU part
@@ -134,28 +134,20 @@ int main(int argc, char *argv[]){
 		// Free the arrays in the host
 		free(a); free(b); free(c); free(temp);
 		
-		// Destroy the events
-		cudaEventDestroy(gpu_start);
-		cudaEventDestroy(gpu_stop);
-
 		return 0;
 }
 
 
 /**** TODO: Write the kernel itself below this line *****/
-
-__global__
-void vecGPU(float* ad, float* bd, float* cd, int n)
+__global__ void vecGPU(float *ad, float *bd, float *cd, int n)
 {
-    int totalNumOfThreads = blockDim.x * gridDim.x;
-	int i, j, index;
-	j = threadIdx.x + blockDim.x * blockIdx.x;
-	for (i = 0; i <= n/totalNumOfThreads; i++)
-	{
-		index = i * totalNumOfThreads + j;
-		if(index<n)
-		{
-			cd[index] += ad[index] * bd[index];
-		}
-	}
+    // Calculate the global thread ID
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+    // Calculate the total number of threads in the grid
+    int stride = gridDim.x * blockDim.x;
+
+    // Use a grid-stride loop to process all elements
+    for (int i = index; i < n; i += stride) {
+        cd[i] += ad[i] * bd[i];
+    }
 }
