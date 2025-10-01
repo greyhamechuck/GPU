@@ -59,15 +59,15 @@ int main(int argc, char *argv[]){
 	   exit(1);
 	}
 	
-	//Fill out the arrays with random numbers between 0 and RANGE;
-	srand((unsigned int)time(NULL));
-	for (i = 0; i < n;  i++){
-        a[i] = ((float)rand()/(float)(RAND_MAX)) * RANGE;
-		b[i] = ((float)rand()/(float)(RAND_MAX)) * RANGE;
-		c[i] = ((float)rand/(float)(RAND_MAX)) * RANGE;
-		temp[i] = c[i]; //temp is just another copy of C
-	}
-	
+    //Fill out the arrays with random numbers between 0 and RANGE;
+    srand((unsigned int)time(NULL));
+    for (i = 0; i < n;  i++){
+        a[i] = ( (float) rand() / (float) (RAND_MAX) ) * RANGE;
+        b[i] = ( (float) rand() / (float) (RAND_MAX) ) * RANGE;
+        c[i] = ( (float) rand() / (float) (RAND_MAX) ) * RANGE;
+        temp[i] = c[i]; //temp is just another copy of C
+    }
+    
     //The sequential part
 	start = clock();
 	for(i = 0; i < n; i++)
@@ -155,3 +155,4 @@ __global__ void vecGPU(float *ad, float *bd, float *cd, int n)
         cd[i] += ad[i] * bd[i];
     }
 }
+
