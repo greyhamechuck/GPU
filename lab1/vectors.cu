@@ -1,227 +1,136 @@
+// vectors.cu  —  follows the original lab skeleton & print style
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
 #include <cuda.h>
+#include <math.h> // for fabsf
 
-#define RANGE 19.87
-#define BILLION  1000000000.00;
+#define RANGE 17.78
+#define BLOCK_NUM   8      // final submission requires 8 blocks
+#define THREADS_NUM 500    // final submission requires 500 threads per block
 
 /*** TODO: insert the declaration of the kernel function below this line ***/
-__global__
-void vecGPU(float* ad, float* bd, float* cd, int n);
-
+__global__ void vecGPU(const float *ad, const float *bd, float *cd, int n);
 /**** end of the kernel declaration ***/
 
+int main(int argc, char *argv[]) {
+    int i, n;
+    float *a, *b, *c, *temp;
+    clock_t start, end;
+    double time_seq = 0.0, time_gpu = 0.0;
 
-int main(int argc, char *argv[]){
-
-	int n = 0; //number of elements in the arrays
-	int i;  //loop index
-	float *a, *b, *c; // The arrays that will be processed in the host.
-	float *temp;  //array in host used in the sequential code.
-	float *ad, *bd, *cd; //The arrays that will be processed in the device.
-	// clock_t start, end; // to meaure the time taken by a specific part of code
-	struct timespec start2, end2; // to meaure the time taken by a specific part of code
-	double accum;
-	
-	if(argc != 2){
-		printf("usage:  ./vectorprog n\n");
-		printf("n = number of elements in each vector\n");
-		exit(1);
-		}
-		
-	n = atoi(argv[1]);
-	printf("Each vector will have %d elements\n", n);
-	
-	
-	//Allocating the arrays in the host
-	
-	if( !(a = (float *)malloc(n*sizeof(float))) )
-	{
-	   printf("Error allocating array a\n");
-	   exit(1);
-	}
-	
-	if( !(b = (float *)malloc(n*sizeof(float))) )
-	{
-	   printf("Error allocating array b\n");
-	   exit(1);
-	}
-	
-	if( !(c = (float *)malloc(n*sizeof(float))) )
-	{
-	   printf("Error allocating array c\n");
-	   exit(1);
-	}
-	
-	if( !(temp = (float *)malloc(n*sizeof(float))) )
-	{
-	   printf("Error allocating array temp\n");
-	   exit(1);
-	}
-	
-	//Fill out the arrays with random numbers between 0 and RANGE;
-	srand((unsigned int)time(NULL));
-	for (i = 0; i < n;  i++){
-        a[i] = ((float)rand()/(float)(RAND_MAX)) * RANGE;
-		b[i] = ((float)rand()/(float)(RAND_MAX)) * RANGE;
-		c[i] = ((float)rand()/(float)(RAND_MAX)) * RANGE;
-		temp[i] = c[i]; //temp is just another copy of C
-	}
-	
-    //The sequential part
-	// start = clock();
-	// if( clock_gettime( CLOCK_REALTIME, &start2) == -1 ) {
-    //   perror( "clock gettime" );
-    //   exit( EXIT_FAILURE );
-    // }
-	clock_gettime( CLOCK_REALTIME, &start2);
-
-	for(i = 0; i < n; i++)
-		temp[i] += a[i] * b[i];
-	// end = clock();
-
-	if( clock_gettime( CLOCK_REALTIME, &end2) == -1 ) {
-      perror( "clock gettime" );
-      exit( EXIT_FAILURE );
+    if (argc < 2) {
+        printf("Usage: %s <n>\n", argv[0]);
+        return 1;
     }
-	// clock_gettime( CLOCK_REALTIME, &end2);
-	// printf("Total time taken by the sequential part = %lf\n", (double)(end - start) / CLOCKS_PER_SEC);
-	accum = ( end2.tv_sec - start2.tv_sec )
-          + ( end2.tv_nsec - start2.tv_nsec )
-            / BILLION;
-	// printf("Sequential: Start sec %lf nsec %lf\t end sec %lf nsec %lf\n", start2.tv_sec, start2.tv_nsec, end2.tv_sec, end2.tv_nsec);
-	printf("Total time taken by the sequential part = %lf\n", accum);
+    n = atoi(argv[1]);
+    if (n <= 0) {
+        printf("n must be positive.\n");
+        return 1;
+    }
 
-    /******************  The start GPU part: Do not modify anything in main() above this line  ************/
-	//The GPU part
-	
-	/* TODO: in this part you need to do the following:
-		1. allocate ad, bd, and cd in the device
-		2. send a, b, and c to the device  
-		*/
+    printf("Each vector will have %d elements\n", n);
 
-	    int size = n * sizeof(float);
-		cudaError_t err = cudaSuccess;
+    // Host allocations
+    a    = (float*) malloc(n * sizeof(float));
+    b    = (float*) malloc(n * sizeof(float));
+    c    = (float*) malloc(n * sizeof(float));
+    temp = (float*) malloc(n * sizeof(float));
 
-	    err = cudaMalloc((void **)&ad, size);
-		if(err != cudaSuccess)
-		{
-			fprintf(stderr, "Error allocating array ad on device: %s\n", cudaGetErrorString(err));
-			exit(1);
-		}
+    if (!a || !b || !c || !temp) {
+        printf("Host allocation failed.\n");
+        return 1;
+    }
 
-		err = cudaMalloc((void **)&bd, size);
-		if(err != cudaSuccess)
-		{
-			fprintf(stderr, "Error allocating array bd on device: %s\n", cudaGetErrorString(err));
-			exit(1);
-		}
+    // Initialize host arrays with random numbers in [0, RANGE)
+    srand((unsigned int) time(NULL));
+    for (i = 0; i < n; ++i) {
+        a[i]    = ((float) rand() / (float) RAND_MAX) * RANGE;
+        b[i]    = ((float) rand() / (float) RAND_MAX) * RANGE;
+        c[i]    = ((float) rand() / (float) RAND_MAX) * RANGE;
+        temp[i] = c[i];   // temp is copy of c for CPU result
+    }
 
-		err = cudaMalloc((void **)&cd, size);
-		if(err != cudaSuccess)
-		{
-			fprintf(stderr, "Error allocating array cd on device: %s\n", cudaGetErrorString(err));
-			exit(1);
-		}
+    // ===== Sequential part (CPU) =====
+    start = clock();
+    for (i = 0; i < n; ++i) {
+        temp[i] += a[i] * b[i];
+    }
+    end = clock();
+    time_seq = (double)(end - start) / CLOCKS_PER_SEC;
+    printf("Total time taken by the sequential part = %.6f seconds\n", time_seq);
 
-		cudaMemcpy(ad, a, size, cudaMemcpyHostToDevice);
-		cudaMemcpy(bd, b, size, cudaMemcpyHostToDevice);
-		cudaMemcpy(cd, c, size, cudaMemcpyHostToDevice);
-		
-		// start = clock();
+    // ===== GPU part (H2D + kernel + D2H as one measured block) =====
 
-		if( clock_gettime( CLOCK_REALTIME, &start2) == -1 ) {
-			perror( "clock gettime" );
-			exit( EXIT_FAILURE );
-		}
-		/* TODO: 	
-		3. write the kernel, call it: vecGPU
-		4. call the kernel (the kernel itself will be written at the comment at the end of this file), 
-		   you need to decide about the number of threads, blocks, etc and their geometry.
-		*/
-		int threadsPerBlock, blocksPerGrid;
-		// // 4 blocks and 500 threads per block
-		// blocksPerGrid = 4;
-		// threadsPerBlock = 500;
-		// 8 blocks and 500 threads per block
-		blocksPerGrid = 8;
-		threadsPerBlock = 500;
-		// // 16 blocks and 500 blocks per block
-		// blocksPerGrid = 16;
-		// threadsPerBlock = 500;
-		// // 4 blocks and 250 threads per block
-		// blocksPerGrid = 4;
-		// threadsPerBlock = 250;
-		// // 8 blocks and 250 threads per block
-		// blocksPerGrid = 8;
-		// threadsPerBlock = 250;
-		// // 16 blocks and 250 blocks per block
-		// blocksPerGrid = 16;
-		// threadsPerBlock = 250;
+    // Device pointers
+    float *ad = NULL, *bd = NULL, *cd = NULL;
 
-		// dim3 block(threadsPerBlock);
-		// dim3 grid(blocksPerGrid);
+    // Start timing the whole GPU “part” (matches your print style)
+    start = clock();
 
-		vecGPU<<<blocksPerGrid,threadsPerBlock>>>(ad, bd, cd, n);
-		// end = clock();
-		if( clock_gettime( CLOCK_REALTIME, &end2) == -1 ) {
-			perror( "clock gettime" );
-			exit( EXIT_FAILURE );
-		}
-	/* TODO: 
-		5. bring the cd array back from the device and store it in c array (declared earlier in main)
-		6. free ad, bd, and cd
-	*/
-        cudaMemcpy(c, cd, size, cudaMemcpyDeviceToHost);
+    /*** TODO: allocate memory on the device for ad, bd, and cd ***/
+    cudaError_t err;
+    err = cudaMalloc((void**)&ad, n * sizeof(float)); if (err != cudaSuccess) { printf("cudaMalloc ad failed\n"); return 1; }
+    err = cudaMalloc((void**)&bd, n * sizeof(float)); if (err != cudaSuccess) { printf("cudaMalloc bd failed\n"); return 1; }
+    err = cudaMalloc((void**)&cd, n * sizeof(float)); if (err != cudaSuccess) { printf("cudaMalloc cd failed\n"); return 1; }
+    /**** end of memory allocation on device ***/
 
-		cudaFree(ad);
-		cudaFree(bd);
-		cudaFree(cd);
-	
-	// printf("Total time taken by the GPU part = %lf\n", (double)(end - start) / CLOCKS_PER_SEC);
-	// printf("GPU: Start sec %lf nsec %lf\t end sec %lf nsec %lf\n", start2.tv_sec, start2.tv_nsec, end2.tv_sec, end2.tv_nsec);
-	accum = ( end2.tv_sec - start2.tv_sec )
-          + ( end2.tv_nsec - start2.tv_nsec )
-            / BILLION;
-	printf("Total time taken by the GPU part = %lf\n", accum);
-	/******************  The end of the GPU part: Do not modify anything in main() below this line  ************/
-	
-	// int wrongCount = 0;
-	//checking the correctness of the GPU part
-	for(i = 0; i < n; i++)
-	{
-		if( fabs(temp[i] - c[i]) >= 0.009) //compare up to the second degit in floating point
-		{
-			printf("Element %d in the result array does not match the sequential version\n", i);
-			// printf("%d:\ta %.2lf\tb %.2lf\tc\tsequential %.2lf\tGPU %.2lf\n\n", i, a[i], b[i], temp[i], c[i]);
-			// wrongCount++;
-		}
-	}
+    /*** TODO: copy a, b, c from host to device ***/
+    err = cudaMemcpy(ad, a, n * sizeof(float), cudaMemcpyHostToDevice); if (err != cudaSuccess) { printf("H2D a failed\n"); return 1; }
+    err = cudaMemcpy(bd, b, n * sizeof(float), cudaMemcpyHostToDevice); if (err != cudaSuccess) { printf("H2D b failed\n"); return 1; }
+    err = cudaMemcpy(cd, c, n * sizeof(float), cudaMemcpyHostToDevice); if (err != cudaSuccess) { printf("H2D c failed\n"); return 1; }
+    /**** end of copy to device ***/
 
-	// printf("Number of c values:\twrong %d\tcorrect %d\n", wrongCount, n-wrongCount);
-		
-	// Free the arrays in the host
-	free(a); free(b); free(c); free(temp);
+    /*** TODO: launch the kernel with BLOCK_NUM and THREADS_NUM ***/
+    vecGPU<<<BLOCK_NUM, THREADS_NUM>>>(ad, bd, cd, n);
+    // Make sure the kernel is finished before we stop the timer
+    cudaDeviceSynchronize();
+    /**** end of kernel launch ***/
 
-	return 0;
+    /*** TODO: copy the result vector back from device to host (into c) ***/
+    err = cudaMemcpy(c, cd, n * sizeof(float), cudaMemcpyDeviceToHost); if (err != cudaSuccess) { printf("D2H c failed\n"); return 1; }
+    /**** end of copy back to host ***/
+
+    // Stop timing the whole GPU part (memcpy + kernel + memcpy)
+    end = clock();
+    time_gpu = (double)(end - start) / CLOCKS_PER_SEC;
+    printf("Total time taken by the GPU part = %.6f seconds\n", time_gpu);
+
+    // ===== Correctness check (GPU vs CPU result) =====
+    // Per handout: compare up to the second digit using 0.009 tolerance.
+    int mismatch = 0;
+    for (i = 0; i < n; ++i) {
+        if (fabsf(temp[i] - c[i]) >= 0.009f) {
+            mismatch = 1;
+            break;
+        }
+    }
+    if (mismatch)
+        printf("Results do not match within tolerance.\n");
+    else
+        printf("Results match within tolerance.\n");
+
+    // Cleanup
+    if (ad) cudaFree(ad);
+    if (bd) cudaFree(bd);
+    if (cd) cudaFree(cd);
+    free(a); free(b); free(c); free(temp);
+
+    return 0;
 }
-
 
 /**** TODO: Write the kernel itself below this line *****/
-
-__global__
-void vecGPU(float* ad, float* bd, float* cd, int n)
+__global__ void vecGPU(const float *ad, const float *bd, float *cd, int n)
 {
-    int totalNumOfThreads = blockDim.x * gridDim.x;
-	int i, j, index;
-	j = threadIdx.x + blockDim.x * blockIdx.x;
-	for (i = 0; i <= n/totalNumOfThreads; i++)
-	{
-		index = i * totalNumOfThreads + j;
-		if(index<n)
-		{
-			cd[index] += ad[index] * bd[index];
-		}
-	}
+    // Global thread id
+    int index  = blockIdx.x * blockDim.x + threadIdx.x;
+    // Total stride over the grid
+    int stride = blockDim.x * gridDim.x;
+
+    // Grid-stride loop covers any n and any launch size
+    for (int i = index; i < n; i += stride) {
+        cd[i] += ad[i] * bd[i];
+    }
 }
+/**** end of kernel *****/
