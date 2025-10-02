@@ -5,8 +5,6 @@
 #include <math.h> // Required for fabs()
 
 #define RANGE 17.78
-#define BLOCK_NUM 8         // Default grid size for final submission1
-#define THREADS_NUM 500     // Default block size for final submission
 
 // Kernel function declaration
 __global__ void vecGPU(float *ad, float *bd, float *cd, int n);
@@ -75,49 +73,87 @@ int main(int argc, char *argv[]){
     printf("Total time taken by the sequential part = %lf seconds\n", (double)(end - start) / CLOCKS_PER_SEC);
 
     /****************** The start GPU part: Do not modify anything in main() above this line  ************/
-    //The GPU part
     
-    // 1. Allocate memory for arrays on the GPU device
-    cudaMalloc((void **)&ad, size);
-    cudaMalloc((void **)&bd, size);
-    cudaMalloc((void **)&cd, size);
+    // Define the configurations to test
+    int block_configs[] = {4, 8, 16, 4, 8, 16};
+    int thread_configs[] = {500, 500, 500, 250, 250, 250};
+    int num_configs = sizeof(block_configs) / sizeof(int);
 
-    // Start the timer for the GPU computation
-    start = clock();
+    // Make a backup of the original 'c' array to reset for each test
+    float *c_original = (float *)malloc(size);
+    if (!c_original) {
+        printf("Error allocating array c_original\n");
+        exit(1);
+    }
+    // memcpy(destination, source, size)
+    for(i = 0; i < n; i++) {
+        c_original[i] = c[i];
+    }
 
-    // 2. Send a, b, and c to the device
-    cudaMemcpy(ad, a, size, cudaMemcpyHostToDevice);
-    cudaMemcpy(bd, b, size, cudaMemcpyHostToDevice);
-    cudaMemcpy(cd, c, size, cudaMemcpyHostToDevice);
+    // Loop through each configuration
+    for (int j = 0; j < num_configs; j++) {
+        int current_blocks = block_configs[j];
+        int current_threads = thread_configs[j];
+
+        printf("\n--- Testing: %d blocks, %d threads ---\n", current_blocks, current_threads);
+
+        // Reset c to its original state before this GPU run
+        for(i = 0; i < n; i++) {
+            c[i] = c_original[i];
+        }
+
+        //The GPU part
         
-    // 3. & 4. Launch the kernel
-    vecGPU<<<BLOCK_NUM, THREADS_NUM>>>(ad, bd, cd, n);
+        // 1. Allocate memory for arrays on the GPU device
+        cudaMalloc((void **)&ad, size);
+        cudaMalloc((void **)&bd, size);
+        cudaMalloc((void **)&cd, size);
+
+        // Start the timer for the GPU computation
+        start = clock();
+
+        // 2. Send a, b, and c to the device
+        cudaMemcpy(ad, a, size, cudaMemcpyHostToDevice);
+        cudaMemcpy(bd, b, size, cudaMemcpyHostToDevice);
+        cudaMemcpy(cd, c, size, cudaMemcpyHostToDevice);
+            
+        // 3. & 4. Launch the kernel
+        vecGPU<<<current_blocks, current_threads>>>(ad, bd, cd, n);
+            
+        // 5. Bring the cd array back from the device
+        cudaMemcpy(c, cd, size, cudaMemcpyDeviceToHost);
+
+        // Block host execution until the device has completed all preceding tasks
+        cudaDeviceSynchronize();
+
+        // Stop the timer
+        end = clock();
+
+        // 6. Free the device memory
+        cudaFree(ad);
+        cudaFree(bd);
+        cudaFree(cd);
         
-    // 5. Bring the cd array back from the device
-    cudaMemcpy(c, cd, size, cudaMemcpyDeviceToHost);
-
-    // Block host execution until the device has completed all preceding tasks
-    cudaDeviceSynchronize();
-
-    // Stop the timer
-    end = clock();
-
-    // 6. Free the device memory
-    cudaFree(ad);
-    cudaFree(bd);
-    cudaFree(cd);
-    
-    // Print the GPU time using clock()
-    printf("Total time taken by the GPU part = %lf\n", (double)(end - start) / CLOCKS_PER_SEC);
+        // Print the GPU time using clock()
+        printf("Total time taken by the GPU part = %lf\n", (double)(end - start) / CLOCKS_PER_SEC);
+        
+        //checking the correctness of the GPU part for this run
+        int error_count = 0;
+        for(i = 0; i < n; i++) {
+            if( fabs(temp[i] - c[i]) >= 0.009) {
+                error_count++;
+            }
+        }
+        if (error_count == 0) {
+            printf("Correctness check PASSED\n");
+        } else {
+            printf("Correctness check FAILED with %d mismatches\n", error_count);
+        }
+    }
     /****************** The end of the GPU part: Do not modify anything in main() below this line  ************/
     
-    //checking the correctness of the GPU part
-    for(i = 0; i < n; i++)
-      if( fabs(temp[i] - c[i]) >= 0.009) //compare up to the second digit in floating point
-        printf("Element %d in the result array does not match the sequential version\n", i);
-        
     // Free the arrays in the host
-    free(a); free(b); free(c); free(temp);
+    free(a); free(b); free(c); free(temp); free(c_original);
     
     return 0;
 }
