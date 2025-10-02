@@ -70,7 +70,8 @@ int main(int argc, char *argv[]){
     for(i = 0; i < n; i++)
         temp[i] += a[i] * b[i];
     end = clock();
-    printf("Total time taken by the sequential part = %lf seconds\n", (double)(end - start) / CLOCKS_PER_SEC);
+    double cpu_time_secs = (double)(end - start) / CLOCKS_PER_SEC;
+    printf("Initial sequential CPU time calculation: %lf seconds\n", cpu_time_secs);
 
     /****************** The start GPU part: Do not modify anything in main() above this line  ************/
     
@@ -134,8 +135,10 @@ int main(int argc, char *argv[]){
         cudaFree(bd);
         cudaFree(cd);
         
-        // Print the GPU time using clock()
-        printf("Total time taken by the GPU part = %lf\n", (double)(end - start) / CLOCKS_PER_SEC);
+        // Print the CPU and GPU times for comparison
+        double gpu_time_secs = (double)(end - start) / CLOCKS_PER_SEC;
+        printf("CPU Time: %lf seconds\n", cpu_time_secs);
+        printf("GPU Time: %lf seconds\n", gpu_time_secs);
         
         //checking the correctness of the GPU part for this run
         int error_count = 0;
