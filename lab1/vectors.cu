@@ -5,144 +5,164 @@
 #include <math.h> // Required for fabs()
 
 #define RANGE 17.78
-#define BLOCK_NUM 8         // Default grid size for final submission
-#define THREADS_NUM 500     // Default block size for final submission
 
-/*** TODO: insert the declaration of the kernel function below this line ***/
+// Kernel function declaration
 __global__ void vecGPU(float *ad, float *bd, float *cd, int n);
-/**** end of the kernel declaration ***/
 
 
 int main(int argc, char *argv[]){
 
-	int n = 0; //number of elements in the arrays
-	int i;  //loop index
-	float *a, *b, *c; // The arrays that will be processed in the host.
-	float *temp;  //array in host used in the sequential code.
-	float *ad, *bd, *cd; //The arrays that will be processed in the device.
-	clock_t start, end; // to meaure the time taken by a specific part of code
-	
-	if(argc != 2){
-		printf("usage:  ./vectorprog n\n");
-		printf("n = number of elements in each vector\n");
-		exit(1);
-		}
-		
-	n = atoi(argv[1]);
-	printf("Each vector will have %d elements\n", n);
-	
-	
-	//Allocating the arrays in the host
-	size_t size = n * sizeof(float);
-	
-	if( !(a = (float *)malloc(size)) )
-	{
-	   printf("Error allocating array a\n");
-	   exit(1);
-	}
-	
-	if( !(b = (float *)malloc(size)) )
-	{
-	   printf("Error allocating array b\n");
-	   exit(1);
-	}
-	
-	if( !(c = (float *)malloc(size)) )
-	{
-	   printf("Error allocating array c\n");
-	   exit(1);
-	}
-	
-	if( !(temp = (float *)malloc(size)) )
-	{
-	   printf("Error allocating array temp\n");
-	   exit(1);
-	}
-	
-	//Fill out the arrays with random numbers between 0 and RANGE;
-	srand((unsigned int)time(NULL));
-	for (i = 0; i < n;  i++){
-        a[i] = ((float)rand()/(float)(RAND_MAX)) * RANGE;
-		b[i] = ((float)rand()/(float)(RAND_MAX)) * RANGE;
-		c[i] = ((float)rand/(float)(RAND_MAX)) * RANGE;
-		temp[i] = c[i]; //temp is just another copy of C
-	}
-	
+    int n = 0; //number of elements in the arrays
+    int i;  //loop index
+    float *a, *b, *c; // The arrays that will be processed in the host.
+    float *temp;  //array in host used in the sequential code.
+    float *ad, *bd, *cd; //The arrays that will be processed in the device.
+    clock_t start, end; // to meaure the time taken by a specific part of code
+    
+    if(argc != 2){
+        printf("usage:  ./vectorprog n\n");
+        printf("n = number of elements in each vector\n");
+        exit(1);
+        }
+        
+    n = atoi(argv[1]);
+    printf("Each vector will have %d elements\n", n);
+    
+    
+    //Allocating the arrays in the host
+    size_t size = n * sizeof(float);
+    
+    if( !(a = (float *)malloc(size)) )
+    {
+       printf("Error allocating array a\n");
+       exit(1);
+    }
+    
+    if( !(b = (float *)malloc(size)) )
+    {
+       printf("Error allocating array b\n");
+       exit(1);
+    }
+    
+    if( !(c = (float *)malloc(size)) )
+    {
+       printf("Error allocating array c\n");
+       exit(1);
+    }
+    
+    if( !(temp = (float *)malloc(size)) )
+    {
+       printf("Error allocating array temp\n");
+       exit(1);
+    }
+    
+    //Fill out the arrays with random numbers between 0 and RANGE;
+    srand((unsigned int)time(NULL));
+    for (i = 0; i < n;  i++){
+        a[i] = ( (float) rand() / (float) (RAND_MAX) ) * RANGE;
+        b[i] = ( (float) rand() / (float) (RAND_MAX) ) * RANGE;
+        c[i] = ( (float) rand() / (float) (RAND_MAX) ) * RANGE;
+        temp[i] = c[i]; //temp is just another copy of C
+    }
+    
     //The sequential part
-	start = clock();
-	for(i = 0; i < n; i++)
-		temp[i] += a[i] * b[i];
-	end = clock();
-	printf("Total time taken by the sequential part = %lf seconds\n", (double)(end - start) / CLOCKS_PER_SEC);
+    start = clock();
+    for(i = 0; i < n; i++)
+        temp[i] += a[i] * b[i];
+    end = clock();
+    double cpu_time_secs = (double)(end - start) / CLOCKS_PER_SEC;
+    printf("Initial sequential CPU time calculation: %lf seconds\n", cpu_time_secs);
 
     /****************** The start GPU part: Do not modify anything in main() above this line  ************/
-	//The GPU part
-	
-    // Create CUDA events for accurate timing
-    cudaEvent_t gpu_start, gpu_stop;
-    float gpu_elapsed_time;
-    cudaEventCreate(&gpu_start);
-    cudaEventCreate(&gpu_stop);
-
-	/* TODO: in this part you need to do the following:
-		1. allocate ad, bd, and cd in the device
-		2. send a, b, and c to the device  
-	*/
-    cudaMalloc((void **)&ad, size);
-    cudaMalloc((void **)&bd, size);
-    cudaMalloc((void **)&cd, size);
-
-    // Record the start event
-    cudaEventRecord(gpu_start);
-
-    cudaMemcpy(ad, a, size, cudaMemcpyHostToDevice);
-    cudaMemcpy(bd, b, size, cudaMemcpyHostToDevice);
-    cudaMemcpy(cd, c, size, cudaMemcpyHostToDevice);
-		
-	/* TODO: 	
-		3. write the kernel, call it: vecGPU
-		4. call the kernel (the kernel itself will be written at the comment at the end of this file), 
-		   you need to decide about the number of threads, blocks, etc and their geometry.
-	*/
-    vecGPU<<<BLOCK_NUM, THREADS_NUM>>>(ad, bd, cd, n);
-		
-	/* TODO: 
-		5. bring the cd array back from the device and store it in c array (declared earlier in main)
-		6. free ad, bd, and cd
-	*/
-	cudaMemcpy(c, cd, size, cudaMemcpyDeviceToHost);
-
-    // Record the stop event and synchronize
-    cudaEventRecord(gpu_stop);
-    cudaEventSynchronize(gpu_stop);
-
-    // Calculate the elapsed time
-    cudaEventElapsedTime(&gpu_elapsed_time, gpu_start, gpu_stop);
-
-    cudaFree(ad);
-    cudaFree(bd);
-    cudaFree(cd);
-	
-	printf("Total time taken by the GPU part = %f seconds\n", gpu_elapsed_time / 1000.0f); // Time is in ms
-	/****************** The end of the GPU part: Do not modify anything in main() below this line  ************/
-	
-	//checking the correctness of the GPU part
-	for(i = 0; i < n; i++)
-	  if( fabs(temp[i] - c[i]) >= 0.009) //compare up to the second degit in floating point
-		printf("Element %d in the result array does not match the sequential version\n", i);
-		
-	// Free the arrays in the host
-	free(a); free(b); free(c); free(temp);
     
-    // Destroy the events
-    cudaEventDestroy(gpu_start);
-    cudaEventDestroy(gpu_stop);
+    // Define the configurations to test
+    int block_configs[] = {4, 8, 16, 4, 8, 16};
+    int thread_configs[] = {500, 500, 500, 250, 250, 250};
+    int num_configs = sizeof(block_configs) / sizeof(int);
 
-	return 0;
+    // Make a backup of the original 'c' array to reset for each test
+    float *c_original = (float *)malloc(size);
+    if (!c_original) {
+        printf("Error allocating array c_original\n");
+        exit(1);
+    }
+    // memcpy(destination, source, size)
+    for(i = 0; i < n; i++) {
+        c_original[i] = c[i];
+    }
+
+    // Loop through each configuration
+    for (int j = 0; j < num_configs; j++) {
+        int current_blocks = block_configs[j];
+        int current_threads = thread_configs[j];
+
+        printf("\n--- Testing: %d blocks, %d threads ---\n", current_blocks, current_threads);
+
+        // Reset c to its original state before this GPU run
+        for(i = 0; i < n; i++) {
+            c[i] = c_original[i];
+        }
+
+        //The GPU part
+        
+        // 1. Allocate memory for arrays on the GPU device
+        cudaMalloc((void **)&ad, size);
+        cudaMalloc((void **)&bd, size);
+        cudaMalloc((void **)&cd, size);
+
+        // Start the timer for the GPU computation
+        start = clock();
+
+        // 2. Send a, b, and c to the device
+        cudaMemcpy(ad, a, size, cudaMemcpyHostToDevice);
+        cudaMemcpy(bd, b, size, cudaMemcpyHostToDevice);
+        cudaMemcpy(cd, c, size, cudaMemcpyHostToDevice);
+            
+        // 3. & 4. Launch the kernel
+        vecGPU<<<current_blocks, current_threads>>>(ad, bd, cd, n);
+            
+        // 5. Bring the cd array back from the device
+        cudaMemcpy(c, cd, size, cudaMemcpyDeviceToHost);
+
+        // Block host execution until the device has completed all preceding tasks
+        cudaDeviceSynchronize();
+
+        // Stop the timer
+        end = clock();
+
+        // 6. Free the device memory
+        cudaFree(ad);
+        cudaFree(bd);
+        cudaFree(cd);
+        
+        // Print the CPU and GPU times for comparison
+        double gpu_time_secs = (double)(end - start) / CLOCKS_PER_SEC;
+        printf("CPU Time: %lf seconds\n", cpu_time_secs);
+        printf("GPU Time: %lf seconds\n", gpu_time_secs);
+        
+        //checking the correctness of the GPU part for this run
+        int error_count = 0;
+        for(i = 0; i < n; i++) {
+            if( fabs(temp[i] - c[i]) >= 0.009) {
+                error_count++;
+            }
+        }
+        if (error_count == 0) {
+            printf("Correctness check PASSED\n");
+        } else {
+            printf("Correctness check FAILED with %d mismatches\n", error_count);
+        }
+    }
+    /****************** The end of the GPU part: Do not modify anything in main() below this line  ************/
+    
+    // Free the arrays in the host
+    free(a); free(b); free(c); free(temp); free(c_original);
+    
+    return 0;
 }
 
 
-/**** TODO: Write the kernel itself below this line *****/
+// Kernel function definition
 __global__ void vecGPU(float *ad, float *bd, float *cd, int n)
 {
     // Calculate the global thread ID
@@ -150,7 +170,7 @@ __global__ void vecGPU(float *ad, float *bd, float *cd, int n)
     // Calculate the total number of threads in the grid
     int stride = gridDim.x * blockDim.x;
 
-    // Use a grid-stride loop to process all elements
+    // Use a grid-stride loop to process all elements, making the kernel more robust
     for (int i = index; i < n; i += stride) {
         cd[i] += ad[i] * bd[i];
     }
