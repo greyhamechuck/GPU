@@ -163,31 +163,34 @@ __global__ void heat_dist_kernel(float* d_new, const float* d_old, unsigned int 
         }
     }
 }
-// Device pointers for the double-buffering strategy
-void simulate_heat_distribution_gpu(float* heat_grid, unsigned int grid_dim, unsigned int iterations) {
-    float *d_grid_prev, *d_grid_curr;
-    size_t grid_size_bytes = grid_dim * grid_dim * sizeof(float);
-
-    cudaMalloc(&d_grid_prev, grid_size_bytes);
-    cudaMalloc(&d_grid_curr, grid_size_bytes);
-
-    cudaMemcpy(d_grid_prev, heat_grid, grid_size_bytes, cudaMemcpyHostToDevice);
-    cudaMemcpy(d_grid_curr, heat_grid, grid_size_bytes, cudaMemcpyHostToDevice);
-
-    dim3 threads_per_block(16, 16);
-    dim3 num_blocks((grid_dim + threads_per_block.x - 1) / threads_per_block.x,
-                    (grid_dim + threads_per_block.y - 1) / threads_per_block.y);
-
-    for (int i = 0; i < iterations; i++) {
-        heat_dist_kernel<<<num_blocks, threads_per_block>>>(d_grid_curr, d_grid_prev, grid_dim);
-
-        float* temp_ptr = d_grid_prev;
-        d_grid_prev = d_grid_curr;
-        d_grid_curr = temp_ptr;
+void  gpu_heat_dist(float * playground, unsigned int N, unsigned int iterations)
+{
+    // Device pointers for our double-buffering strategy
+    float *d_old, *d_new;
+    size_t size = N * N * sizeof(float);
+  
+    cudaMalloc(&d_old, size);
+    cudaMalloc(&d_new, size);
+    cudaMemcpy(d_old, playground, size, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_new, playground, size, cudaMemcpyHostToDevice);
+    
+    dim3 threadsPerBlock(16, 16);
+    
+    dim3 numBlocks((N + threadsPerBlock.x - 1) / threadsPerBlock.x, 
+                   (N + threadsPerBlock.y - 1) / threadsPerBlock.y);
+                   
+    for (int k = 0; k < iterations; k++) {
+        heat_dist_kernel<<<numBlocks, threadsPerBlock>>>(d_new, d_old, N);
+        
+        float* temp = d_old;
+        d_old = d_new;
+        d_new = temp;
     }
-
-    cudaMemcpy(heat_grid, d_grid_prev, grid_size_bytes, cudaMemcpyDeviceToHost);
-    cudaFree(d_grid_prev);
-    cudaFree(d_grid_curr);
+    
+    cudaMemcpy(playground, d_old, size, cudaMemcpyDeviceToHost);
+    
+    cudaFree(d_old);
+    cudaFree(d_new);
 }
+
 
