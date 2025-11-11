@@ -106,5 +106,5 @@ int main(int argc, char *argv[]) {
     fclose(fp);
     free(is_prime);
 
-    return 0; // Success
+    return 0; 
 }
