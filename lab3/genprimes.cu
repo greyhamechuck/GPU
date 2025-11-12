@@ -1,18 +1,6 @@
-/*
- * genprimes.cu
- *
- * Parallel prime number generator for CSCI-GA.3033-025, Lab 3.
- * Implements the specified sieve algorithm using CUDA.
- *
- * Usage: ./genprimes N
- * Input: N (a positive number > 2)
- * Output: A file named N.txt (e.g., 10.txt) containing all prime
- * numbers from 2 to N, separated by single spaces.
- */
-
 #include <stdio.h>
 #include <stdlib.h>
-#include <math.h>   // For floor
+#include <math.h>   
 #include <cuda_runtime.h>
 
 // --- CUDA Error Checking Utility ---
