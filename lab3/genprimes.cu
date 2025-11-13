@@ -110,7 +110,7 @@ int main(int argc, char *argv[]) {
     // --- 4. Implement the Sieve Algorithm (Host-driven) ---
 
     // "5. Continue like this till floor((N+1)/2)."
-    unsigned int stop_point = (unsigned int)floor((N + 1) / 2.0);
+    unsigned int stop_point = (unsigned int)floor((double)(N + 1) / 2.0);
 
     for (unsigned int p = 2; p <= stop_point; p++) {
         
