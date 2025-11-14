@@ -1,20 +1,9 @@
-/*
- * newgen.cu
- * Lab 3: Parallel Prime Sieve (CUDA)
- *
- * Implements the Sieve of Eratosthenes algorithm as specified in the PDF:
- * 1. Generate all numbers from 2 to N
- * 2. Start with 2, cross out multiples of 2 (4, 6, 8, ... N)
- * 3. Move to next unmarked number (3), cross out multiples of 3 (9, 15, ...)
- * 4. Continue sequentially until floor((N+1)/2)
- * 5. Remaining numbers are primes
- */
-
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>   
 #include <cuda_runtime.h>
 
-// CUDA Error Checking Utility
+// check cuda errors
 #define CHECK_CUDA(call) do { \
     cudaError_t err = call; \
     if (err != cudaSuccess) { \
@@ -25,159 +14,142 @@
 
 // --- CUDA Kernels ---
 
-/**
- * Initialize the sieve array: mark all numbers from 2 to N as prime (1)
- * Mark 0 and 1 as not prime (0)
- */
-__global__ void initKernel(char *d_is_prime, unsigned int N) {
-    unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    unsigned int stride = gridDim.x * blockDim.x;
-    
-    for (unsigned int i = idx; i <= N; i += stride) {
-        d_is_prime[i] = (i >= 2) ? 1 : 0;
+// generate numbers from 0 to N and initialize the is_prime array
+__global__ void init_kernel(char* is_prime, long N) {
+    long global_id = (long)blockIdx.x * blockDim.x + threadIdx.x;
+    long stride = (long)gridDim.x * blockDim.x;
+    for (long i = global_id; i <= N; i += stride) {
+        if (i == 0 || i == 1) {
+            is_prime[i] = 0; // 0 and 1 are not prime
+        } else {
+            is_prime[i] = 1; // all numbers are prime, lets assume
+        }
     }
 }
 
-/**
- * Cross out multiples of prime p starting from p*p
- * (Smaller multiples already crossed by smaller primes)
- * Each thread processes different multiples in parallel
- */
-__global__ void sieveKernel(char *d_is_prime, unsigned int p, unsigned int N) {
-    unsigned int tid = blockIdx.x * blockDim.x + threadIdx.x;
-    unsigned int stride = gridDim.x * blockDim.x;
+// Vertical processing kernel: each thread handles one potential prime p
+// Checks if p is prime on GPU (by reading from device memory) and marks its multiples
+// This eliminates device-to-host transfers - everything happens on the GPU
+// The "vertical" approach means processing by potential primes (columns) in parallel
+// rather than processing one prime at a time sequentially (rows)
+__global__ void vertical_process_kernel(char* is_prime, long N, long start_p, long end_p) {
+    long p = start_p + (long)blockIdx.x * blockDim.x + threadIdx.x;
     
-    // Start from p*p (optimization: smaller multiples already crossed)
-    unsigned long long start = (unsigned long long)p * p;
-    
-    // If p*p > N, nothing to do
-    if (start > N) return;
-    
-    // Each thread handles multiples with stride - parallel processing
-    for (unsigned long long multiple = start + tid * p; 
-         multiple <= N; 
-         multiple += stride * p) {
-        d_is_prime[multiple] = 0; // Cross out the number
-    }
-}
-
-// --- Host Code (main) ---
-
-int main(int argc, char *argv[]) {
-    
-    // --- 1. Process Input ---
-    if (argc != 2) {
-        fprintf(stderr, "Usage: %s N\n", argv[0]);
-        return 1;
-    }
-    
-    unsigned int N = (unsigned int)strtoul(argv[1], NULL, 10);
-    if (N <= 2) {
-        fprintf(stderr, "Error: N must be bigger than 2.\n");
-        return 1;
-    }
-    
-    // --- 2. Setup Memory ---
-    size_t bytes = (N + 1) * sizeof(char);
-    
-    char *d_is_prime;
-    CHECK_CUDA(cudaMalloc(&d_is_prime, bytes));
-    
-    // --- 3. Initialize Sieve Array (GPU) ---
-    unsigned int threadsPerBlock = 256;
-    unsigned int blocksPerGrid = (N + threadsPerBlock - 1) / threadsPerBlock;
-    
-    initKernel<<<blocksPerGrid, threadsPerBlock>>>(d_is_prime, N);
-    CHECK_CUDA(cudaGetLastError());
-    CHECK_CUDA(cudaDeviceSynchronize());
-    
-    // --- 4. Implement the Sieve Algorithm (Sequential as per PDF) ---
-    // Algorithm: Start with 2, cross out multiples, then move to next unmarked (3), etc.
-    // Stop at floor((N+1)/2)
-    
-    unsigned int sieve_limit = (N + 1) / 2;
-    
-    // Use pinned memory for faster single-byte transfers
-    char *h_prime_check;
-    CHECK_CUDA(cudaMallocHost(&h_prime_check, sizeof(char)));
-    
-    // Process each number from 2 to sieve_limit sequentially
-    for (unsigned int p = 2; p <= sieve_limit; p++) {
-        
-        // Check if p is still marked as prime (device-to-host transfer)
-        CHECK_CUDA(cudaMemcpy(h_prime_check, &d_is_prime[p], 
-                             sizeof(char), cudaMemcpyDeviceToHost));
-        
-        if (*h_prime_check == 1) {
-            // p is prime, so cross out all its multiples
-            // Start from p*p (smaller multiples already crossed by smaller primes)
-            unsigned long long start_multiple = (unsigned long long)p * p;
-            
-            if (start_multiple <= N) {
-                // Calculate number of multiples to process
-                unsigned int numMultiples = (N - start_multiple) / p + 1;
-                
-                // Launch kernel to cross out multiples in parallel
-                unsigned int threads_sieve = 256;
-                unsigned int blocks_sieve = (numMultiples + threads_sieve - 1) / threads_sieve;
-                
-                sieveKernel<<<blocks_sieve, threads_sieve>>>(d_is_prime, p, N);
-                CHECK_CUDA(cudaGetLastError());
+    if (p >= start_p && p <= end_p && p <= (N + 1) / 2) {
+        // Check if p is still marked as prime (read directly from device memory)
+        // This avoids the device-to-host transfer used in genprimes.cu
+        if (is_prime[p] == 1) {
+            // Mark all multiples of p starting from 2*p
+            for (long i = 2 * p; i <= N; i += p) {
+                is_prime[i] = 0; // "Cross out" the number
             }
         }
     }
-    
-    // Final synchronization
-    CHECK_CUDA(cudaDeviceSynchronize());
-    
-    // --- 5. Copy Final Result Back to Host ---
-    char *h_is_prime = (char *)malloc(bytes);
-    if (h_is_prime == NULL) {
-        fprintf(stderr, "Error: Memory allocation failed.\n");
-        cudaFreeHost(h_prime_check);
-        cudaFree(d_is_prime);
-        return 1;
-    }
-    
-    CHECK_CUDA(cudaMemcpy(h_is_prime, d_is_prime, bytes, cudaMemcpyDeviceToHost));
-    
-    // --- 6. Write Output to File ---
+}
+
+// Output files generator
+void write_file(const char* h_is_prime, long N) {
     char filename[256];
-    sprintf(filename, "%u.txt", N);
-    
-    FILE *fp = fopen(filename, "w");
-    if (fp == NULL) {
-        fprintf(stderr, "Error: Could not open output file %s\n", filename);
-        free(h_is_prime);
-        cudaFreeHost(h_prime_check);
-        cudaFree(d_is_prime);
-        return 1;
+    sprintf(filename, "%ld.txt", N);
+    FILE* f = fopen(filename, "w");
+    if (f == NULL) {
+        fprintf(stderr, "Error opening output file!\n");
+        return;
     }
     
-    // Handle output spacing: first prime without leading space, rest with space
-    unsigned int first_p = 2;
+    // Find first prime for proper formatting
+    long first_p = 2;
     while (first_p <= N && h_is_prime[first_p] == 0) {
         first_p++;
     }
     
     if (first_p <= N) {
-        fprintf(fp, "%u", first_p);
+        fprintf(f, "%ld", first_p);
     }
     
     // Print remaining primes with leading space
-    for (unsigned int i = first_p + 1; i <= N; i++) {
+    for (long i = first_p + 1; i <= N; i++) {
         if (h_is_prime[i] == 1) {
-            fprintf(fp, " %u", i);
+            fprintf(f, " %ld", i);
         }
     }
-    fprintf(fp, "\n");
-    
-    // --- 7. Cleanup ---
-    fclose(fp);
-    free(h_is_prime);
-    cudaFreeHost(h_prime_check);
-    cudaFree(d_is_prime);
-    
-    return 0;
+    fprintf(f, "\n");
+    fclose(f);
 }
 
+int main(int argc, char** argv) {
+    
+    if (argc != 2) {
+        fprintf(stderr, "Usage: %s N\n", argv[0]);
+        return 1;
+    }
+    long N = atol(argv[1]); // the upper limit
+    if (N <= 1) {
+        fprintf(stderr, "N must be > 1\n");
+        return 1;
+    }
+
+    clock_t start = clock();
+
+    // Allocate GPU Memory
+    char* d_is_prime; 
+    size_t array_size = (N + 1) * sizeof(char);
+    CHECK_CUDA(cudaMalloc(&d_is_prime, array_size));
+
+    // Set Kernel Launch Parameters 
+    int threadsPerBlock = 256;
+    int blocksPerGrid = 1024;
+
+    // Launch init_kernel
+    init_kernel<<<blocksPerGrid, threadsPerBlock>>>(d_is_prime, N);
+    CHECK_CUDA(cudaDeviceSynchronize());
+
+    // Vertical approach: process all potential primes in parallel batches
+    // Each thread handles one potential prime p, checks if it's prime on GPU,
+    // and marks its multiples - all without device-to-host transfers
+    // This is the "vertical" optimization: processing by columns (potential primes)
+    // rather than rows (one prime at a time with host coordination)
+    
+    // Process in batches to balance parallelism and memory coherence
+    long batch_size = 100000; // Process 100000 numbers at a time
+    long sieve_limit = (N + 1) / 2;
+    
+    for (long batch_start = 2; batch_start <= sieve_limit; batch_start += batch_size) {
+        long batch_end = (batch_start + batch_size - 1 < sieve_limit) ? 
+                         batch_start + batch_size - 1 : sieve_limit;
+        
+        long batch_range = batch_end - batch_start + 1;
+        int blocks_for_batch = (batch_range + threadsPerBlock - 1) / threadsPerBlock;
+        
+        if (blocks_for_batch > 0) {
+            // Launch kernel where each thread processes one potential prime
+            // Threads check if their number is prime (reading from device memory)
+            // and mark multiples - all on GPU, no host involvement
+            vertical_process_kernel<<<blocks_for_batch, threadsPerBlock>>>(
+                d_is_prime, N, batch_start, batch_end);
+        }
+    }
+    CHECK_CUDA(cudaDeviceSynchronize());
+    
+    // Stop Timer
+    clock_t end = clock();
+    double cpu_time_used = ((double) (end - start)) / CLOCKS_PER_SEC;
+
+    // Allocate Host Memory and Copy Results
+    char* h_is_prime = (char*)malloc(array_size);
+    if (h_is_prime == NULL) {
+        fprintf(stderr, "Failed to allocate host memory\n");
+        return 1;
+    }
+
+    CHECK_CUDA(cudaMemcpy(h_is_prime, d_is_prime, array_size, cudaMemcpyDeviceToHost));
+
+    // Write Output and Clean Up
+    write_file(h_is_prime, N);
+    free(h_is_prime);
+    CHECK_CUDA(cudaFree(d_is_prime));
+
+    printf("Total GPU time (real): %f seconds\n", cpu_time_used);
+
+    return 0;
+}
